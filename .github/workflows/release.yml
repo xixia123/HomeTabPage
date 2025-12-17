@@ -1,0 +1,53 @@
+name: Build and Release Extension
+
+on:
+  push:
+    tags:
+      - 'v*'  # 匹配 v1.0.0, v1.2.3 等
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create ZIP package
+        run: |
+          cd extension
+          zip -r ../card-tab-${{ steps.version.outputs.VERSION }}.zip .
+          cd ..
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Card Tab v${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Card Tab v${{ steps.version.outputs.VERSION }}
+            
+            ### 安装方式
+            
+            **Chrome / Edge:**
+            1. 下载 `card-tab-${{ steps.version.outputs.VERSION }}.zip`
+            2. 解压到本地文件夹
+            3. 打开 `chrome://extensions/`
+            4. 开启开发者模式
+            5. 点击"加载已解压的扩展程序"
+            6. 选择解压后的文件夹
+            
+            **Firefox:**
+            1. 下载 `card-tab-${{ steps.version.outputs.VERSION }}.zip`
+            2. 访问 `about:debugging#/runtime/this-firefox`
+            3. 点击"加载临时附加组件"
+            4. 选择 ZIP 文件中的 `manifest.json`
+          files: |
+            card-tab-${{ steps.version.outputs.VERSION }}.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
