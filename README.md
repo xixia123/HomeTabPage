@@ -16,7 +16,8 @@ HomeTabPage/
 │   │   └── theme-init.js # 主题初始化
 │   └── icons/
 │       └── icon.svg     # 扩展图标
-└── worker.js            # Cloudflare Worker 版本 (原始)
+└── worker/
+    └── worker.js     # Cloudflare Worker 版本 (原始)
 ```
 
 ## 功能特性
