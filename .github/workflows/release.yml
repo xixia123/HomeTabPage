@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'  # 匹配 v1.0.0, v1.2.3 等
 
+permissions:
+  contents: write  # 允许创建 Release
+
 jobs:
   build:
     runs-on: ubuntu-latest
