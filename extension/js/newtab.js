@@ -7,16 +7,29 @@ const categories = {};
 let currentEngine;
 let initialDragState = { category: null, index: -1 };
 
-// 使用公开的 favicon API
-const imgApi = 'https://www.google.com/s2/favicons?sz=64&domain=';
+// 多个公开的 favicon API（按优先级排序）
+const faviconApis = [
+    (hostname) => `https://favicon.im/${hostname}?larger=true`,
+    (hostname) => `https://api.iowen.cn/favicon/${hostname}.png`,
+    (hostname) => `https://www.google.com/s2/favicons?sz=64&domain=${hostname}`,
+    (hostname) => `https://icons.duckduckgo.com/ip3/${hostname}.ico`,
+    (hostname) => `https://${hostname}/favicon.ico`
+];
 
-function getFaviconUrl(url) {
+function getHostname(url) {
     try {
-        const hostname = new URL(url.startsWith('http') ? url : 'http://' + url).hostname;
-        return imgApi + hostname;
+        return new URL(url.startsWith('http') ? url : 'http://' + url).hostname;
     } catch {
-        return imgApi + url;
+        return url;
     }
+}
+
+function getFaviconUrl(url, apiIndex = 0) {
+    const hostname = getHostname(url);
+    if (apiIndex < faviconApis.length) {
+        return faviconApis[apiIndex](hostname);
+    }
+    return faviconApis[0](hostname);
 }
 
 // 搜索引擎配置
@@ -613,9 +626,32 @@ function createCard(link, container) {
         : 'w-9 h-9 rounded-lg object-contain bg-slate-100 dark:bg-slate-900 p-1 border border-slate-200 dark:border-slate-700 transition-transform group-hover:scale-105 pointer-events-none';
 
     icon.className = iconClass;
-    icon.src = link.icon?.startsWith('http') ? link.icon : getFaviconUrl(link.url);
+
+    // 设置初始 API 索引
+    icon.dataset.apiIndex = '0';
+    icon.dataset.linkUrl = link.url;
+
+    // 如果用户设置了自定义图标，优先使用
+    if (link.icon?.startsWith('http')) {
+        icon.src = link.icon;
+    } else {
+        icon.src = getFaviconUrl(link.url, 0);
+    }
+
     icon.onerror = function () {
-        this.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' y='8' x2='12' y='12'/%3E%3Cline x1='12' y='16' x2='12.01' y='16'/%3E%3C/svg%3E";
+        const currentIndex = parseInt(this.dataset.apiIndex || '0');
+        const nextIndex = currentIndex + 1;
+        const linkUrl = this.dataset.linkUrl;
+
+        // 如果还有备用 API，尝试下一个
+        if (nextIndex < faviconApis.length) {
+            this.dataset.apiIndex = nextIndex.toString();
+            this.src = getFaviconUrl(linkUrl, nextIndex);
+        } else {
+            // 所有 API 都失败了，使用默认图标
+            this.onerror = null; // 防止无限循环
+            this.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' y1='8' x2='12' y2='12'/%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'/%3E%3C/svg%3E";
+        }
     };
 
     const title = document.createElement('div');
