@@ -32,9 +32,21 @@ HomeTabPage/
 
 ## 安装方式
 
-### Chrome / Edge
+### 🚀 快速安装（推荐）
 
-1. 下载或克隆本仓库
+1. 前往 [Releases 页面](https://github.com/xixia123/HomeTabPage/releases) 下载最新版本
+2. 解压下载的 ZIP 文件
+3. 打开浏览器，访问 `chrome://extensions/`（Chrome）或 `edge://extensions/`（Edge）
+4. 开启右上角的 **开发者模式**
+5. 点击 **加载已解压的扩展程序**
+6. 选择解压后的 `extension` 文件夹
+7. 打开新标签页即可使用
+
+### 开发者安装
+
+如果你想参与开发或修改代码：
+
+1. 克隆本仓库：`git clone https://github.com/xixia123/HomeTabPage.git`
 2. 打开浏览器，访问 `chrome://extensions/`（或 `edge://extensions/`）
 3. 开启右上角的 **开发者模式**
 4. 点击 **加载已解压的扩展程序**
