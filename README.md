@@ -34,6 +34,7 @@ HomeTabPage/
 
 ### 🚀 快速安装（推荐）
 
+**Chrome / Edge:**
 1. 前往 [Releases 页面](https://github.com/xixia123/HomeTabPage/releases) 下载最新版本
 2. 解压下载的 ZIP 文件
 3. 打开浏览器，访问 `chrome://extensions/`（Chrome）或 `edge://extensions/`（Edge）
@@ -41,6 +42,9 @@ HomeTabPage/
 5. 点击 **加载已解压的扩展程序**
 6. 选择解压后的 `extension` 文件夹
 7. 打开新标签页即可使用
+
+**Firefox:**
+- 直接访问 [Firefox 扩展商店](https://addons.mozilla.org/zh-CN/firefox/addon/card-tab-%E6%88%91%E7%9A%84%E5%AF%BC%E8%88%AA/) 安装
 
 ### 开发者安装
 

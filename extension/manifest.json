@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Card Tab - 我的导航",
-    "version": "1.0.0",
+    "version": "1.0.5",
     "description": "自定义新标签页导航，支持分类管理、拖拽排序、深色模式",
     "permissions": [
         "storage"
