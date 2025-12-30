@@ -764,51 +764,30 @@ function updateCategorySelect() {
 
 // 异步加载 favicon，优先从缓存获取
 async function loadFaviconWithCache(imgElement, url) {
-    const hostname = getHostname(url);
-
-    // 先尝试从缓存获取
-    const cached = await getCachedFavicon(hostname);
-    if (cached) {
-        imgElement.src = cached;
-        return;
+    // 尝试通过 fetch 获取并缓存（按优先级尝试所有 API）
+    for (let i = 0; i < faviconApis.length; i++) {
+        const dataUrl = await fetchAndCacheFavicon(url, i);
+        if (dataUrl) {
+            imgElement.src = dataUrl;
+            return;
+        }
     }
 
-    // 缓存中没有，从网络加载
-    imgElement.src = getFaviconUrl(url, 0);
-
-    imgElement.onerror = async function () {
-        const currentIndex = parseInt(this.dataset.apiIndex || '0');
-        const nextIndex = currentIndex + 1;
-        const linkUrl = this.dataset.linkUrl;
-
-        // 如果还有备用 API，尝试下一个
-        if (nextIndex < faviconApis.length) {
-            this.dataset.apiIndex = nextIndex.toString();
-            this.src = getFaviconUrl(linkUrl, nextIndex);
-        } else {
-            // 所有 API 都失败了，使用默认图标
-            this.onerror = null; // 防止无限循环
-            this.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' y1='8' x2='12' y2='12'/%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'/%3E%3C/svg%3E";
+    // 如果 fetch 全部失败（例如 CORS 限制），退回到直接加载（无法缓存，但能显示）
+    const loadDirectly = (index) => {
+        if (index >= faviconApis.length) {
+            // 所有 API 都失败，使用默认图标
+            imgElement.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' y1='8' x2='12' y2='12'/%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'/%3E%3C/svg%3E";
+            return;
         }
+
+        imgElement.src = getFaviconUrl(url, index);
+        imgElement.onerror = () => loadDirectly(index + 1);
+        // 直接加载时不使用 onload 缓存，因为跨域图片画入 canvas 会报错
+        imgElement.onload = null;
     };
 
-    // 成功加载后缓存（使用 Canvas 避免 CORS 问题）
-    imgElement.onload = function () {
-        // 只缓存成功从网络加载的图标（不是默认图标或已缓存的 data URL）
-        if (!this.src.startsWith('data:')) {
-            try {
-                const canvas = document.createElement('canvas');
-                canvas.width = this.naturalWidth || 64;
-                canvas.height = this.naturalHeight || 64;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(this, 0, 0);
-                const dataUrl = canvas.toDataURL('image/png');
-                setCachedFavicon(hostname, dataUrl);
-            } catch {
-                // 跨域图片无法使用 Canvas，忽略缓存
-            }
-        }
-    };
+    loadDirectly(0);
 }
 
 // ===== 卡片创建 =====
