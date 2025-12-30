@@ -574,23 +574,58 @@ function renderCategorySections({ renderButtons = false, searchMode = false, fil
             controls.className = 'flex items-center gap-1 ml-auto bg-slate-300/50 dark:bg-slate-800/50 p-1 rounded-xl border border-slate-300/50 dark:border-slate-700/50 backdrop-blur-sm';
             const btnBase = "w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 hover:scale-105 active:scale-95";
 
-            controls.innerHTML = `
-                <button class="${btnBase} text-slate-500 hover:text-blue-600 hover:bg-blue-100 dark:text-slate-400 dark:hover:bg-blue-900/30" onclick="editCategoryName('${category}')" title="重命名">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                </button>
-                <button class="${btnBase} text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:text-slate-400" onclick="moveCategory('${category}', -1)" title="上移">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
-                </button>
-                <button class="${btnBase} text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:text-slate-400" onclick="moveCategory('${category}', 1)" title="下移">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                </button>
-                <button class="${btnBase} text-slate-500 hover:text-amber-600 hover:bg-amber-100 dark:text-slate-400" onclick="pinCategory('${category}')" title="置顶">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3h14M18 13l-6-6l-6 6M12 7v14"></path></svg>
-                </button>
-                <button class="${btnBase} text-slate-400 hover:text-red-600 hover:bg-red-100 dark:text-slate-500" onclick="deleteCategory('${category}')" title="删除">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                </button>
-            `;
+            // 重命名按钮
+            const renameBtn = document.createElement('button');
+            renameBtn.className = `${btnBase} text-slate-500 hover:text-blue-600 hover:bg-blue-100 dark:text-slate-400 dark:hover:bg-blue-900/30`;
+            renameBtn.title = "重命名";
+            renameBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>';
+            renameBtn.addEventListener('click', () => editCategoryName(category));
+            controls.appendChild(renameBtn);
+
+            // 上移按钮
+            const moveUpBtn = document.createElement('button');
+            moveUpBtn.className = `${btnBase} text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:text-slate-400`;
+            moveUpBtn.title = "上移";
+            moveUpBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>';
+            moveUpBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                moveCategory(category, -1);
+            });
+            controls.appendChild(moveUpBtn);
+
+            // 下移按钮
+            const moveDownBtn = document.createElement('button');
+            moveDownBtn.className = `${btnBase} text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:text-slate-400`;
+            moveDownBtn.title = "下移";
+            moveDownBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>';
+            moveDownBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                moveCategory(category, 1);
+            });
+            controls.appendChild(moveDownBtn);
+
+            // 置顶按钮
+            const pinBtn = document.createElement('button');
+            pinBtn.className = `${btnBase} text-slate-500 hover:text-amber-600 hover:bg-amber-100 dark:text-slate-400`;
+            pinBtn.title = "置顶";
+            pinBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3h14M18 13l-6-6l-6 6M12 7v14"></path></svg>';
+            pinBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                pinCategory(category);
+            });
+            controls.appendChild(pinBtn);
+
+            // 删除按钮
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = `${btnBase} text-slate-400 hover:text-red-600 hover:bg-red-100 dark:text-slate-500`;
+            deleteBtn.title = "删除";
+            deleteBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
+            deleteBtn.addEventListener('click', () => deleteCategory(category));
+            controls.appendChild(deleteBtn);
+
             titleContainer.appendChild(controls);
         }
 
@@ -736,22 +771,20 @@ async function loadFaviconWithCache(imgElement, url) {
         }
     };
 
-    // 成功加载后缓存
-    imgElement.onload = async function () {
-        // 只缓存成功从网络加载的图标（不是默认图标）
-        if (!this.src.startsWith('data:image/svg+xml')) {
+    // 成功加载后缓存（使用 Canvas 避免 CORS 问题）
+    imgElement.onload = function () {
+        // 只缓存成功从网络加载的图标（不是默认图标或已缓存的 data URL）
+        if (!this.src.startsWith('data:')) {
             try {
-                const response = await fetch(this.src);
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const reader = new FileReader();
-                    reader.onloadend = async () => {
-                        await setCachedFavicon(hostname, reader.result);
-                    };
-                    reader.readAsDataURL(blob);
-                }
+                const canvas = document.createElement('canvas');
+                canvas.width = this.naturalWidth || 64;
+                canvas.height = this.naturalHeight || 64;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(this, 0, 0);
+                const dataUrl = canvas.toDataURL('image/png');
+                setCachedFavicon(hostname, dataUrl);
             } catch {
-                // 缓存失败不影响显示
+                // 跨域图片无法使用 Canvas，忽略缓存
             }
         }
     };
@@ -1270,3 +1303,10 @@ document.addEventListener('click', (e) => {
         document.querySelectorAll('.card-menu-dropdown').forEach(el => el.style.display = 'none');
     }
 });
+
+// ===== 暴露函数到全局作用域（用于 HTML 内联 onclick 调用）=====
+window.editCategoryName = editCategoryName;
+window.moveCategory = moveCategory;
+window.pinCategory = pinCategory;
+window.deleteCategory = deleteCategory;
+window.toggleCategoryHidden = toggleCategoryHidden;
