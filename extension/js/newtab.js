@@ -7,14 +7,123 @@ const categories = {};
 let currentEngine;
 let initialDragState = { category: null, index: -1 };
 
-// 多个公开的 favicon API（按优先级排序）
+// 多个公开的 favicon API（按优先级排序，中国大陆可用的优先）
 const faviconApis = [
-    (hostname) => `https://favicon.im/${hostname}?larger=true`,
     (hostname) => `https://api.iowen.cn/favicon/${hostname}.png`,
+    (hostname) => `https://favicon.im/${hostname}?larger=true`,
     (hostname) => `https://www.google.com/s2/favicons?sz=64&domain=${hostname}`,
     (hostname) => `https://icons.duckduckgo.com/ip3/${hostname}.ico`,
     (hostname) => `https://${hostname}/favicon.ico`
 ];
+
+// ===== Favicon 缓存 (IndexedDB) =====
+const FAVICON_DB_NAME = 'favicon-cache';
+const FAVICON_STORE_NAME = 'favicons';
+const FAVICON_CACHE_EXPIRY_DAYS = 7;
+
+let faviconDB = null;
+
+async function openFaviconDB() {
+    if (faviconDB) return faviconDB;
+
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(FAVICON_DB_NAME, 1);
+
+        request.onerror = () => reject(request.error);
+
+        request.onsuccess = () => {
+            faviconDB = request.result;
+            resolve(faviconDB);
+        };
+
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(FAVICON_STORE_NAME)) {
+                db.createObjectStore(FAVICON_STORE_NAME, { keyPath: 'hostname' });
+            }
+        };
+    });
+}
+
+async function getCachedFavicon(hostname) {
+    try {
+        const db = await openFaviconDB();
+        return new Promise((resolve) => {
+            const transaction = db.transaction(FAVICON_STORE_NAME, 'readonly');
+            const store = transaction.objectStore(FAVICON_STORE_NAME);
+            const request = store.get(hostname);
+
+            request.onsuccess = () => {
+                const result = request.result;
+                if (result) {
+                    // 检查是否过期
+                    const now = Date.now();
+                    const expiryTime = FAVICON_CACHE_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+                    if (now - result.timestamp < expiryTime) {
+                        resolve(result.dataUrl);
+                        return;
+                    }
+                }
+                resolve(null);
+            };
+
+            request.onerror = () => resolve(null);
+        });
+    } catch {
+        return null;
+    }
+}
+
+async function setCachedFavicon(hostname, dataUrl) {
+    try {
+        const db = await openFaviconDB();
+        return new Promise((resolve) => {
+            const transaction = db.transaction(FAVICON_STORE_NAME, 'readwrite');
+            const store = transaction.objectStore(FAVICON_STORE_NAME);
+            store.put({
+                hostname: hostname,
+                dataUrl: dataUrl,
+                timestamp: Date.now()
+            });
+            transaction.oncomplete = () => resolve(true);
+            transaction.onerror = () => resolve(false);
+        });
+    } catch {
+        return false;
+    }
+}
+
+async function fetchAndCacheFavicon(url, apiIndex = 0) {
+    const hostname = getHostname(url);
+
+    // 尝试从缓存获取
+    const cached = await getCachedFavicon(hostname);
+    if (cached) {
+        return cached;
+    }
+
+    // 从网络获取并缓存
+    const faviconUrl = getFaviconUrl(url, apiIndex);
+
+    try {
+        const response = await fetch(faviconUrl);
+        if (!response.ok) throw new Error('Fetch failed');
+
+        const blob = await response.blob();
+        const dataUrl = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+        });
+
+        // 缓存成功获取的 favicon
+        await setCachedFavicon(hostname, dataUrl);
+        return dataUrl;
+    } catch {
+        // 如果还有备用 API，返回 null 让调用方尝试下一个
+        return null;
+    }
+}
 
 function getHostname(url) {
     try {
@@ -31,6 +140,7 @@ function getFaviconUrl(url, apiIndex = 0) {
     }
     return faviconApis[0](hostname);
 }
+
 
 // 搜索引擎配置
 const searchEngines = {
@@ -596,6 +706,57 @@ function updateCategorySelect() {
     });
 }
 
+// 异步加载 favicon，优先从缓存获取
+async function loadFaviconWithCache(imgElement, url) {
+    const hostname = getHostname(url);
+
+    // 先尝试从缓存获取
+    const cached = await getCachedFavicon(hostname);
+    if (cached) {
+        imgElement.src = cached;
+        return;
+    }
+
+    // 缓存中没有，从网络加载
+    imgElement.src = getFaviconUrl(url, 0);
+
+    imgElement.onerror = async function () {
+        const currentIndex = parseInt(this.dataset.apiIndex || '0');
+        const nextIndex = currentIndex + 1;
+        const linkUrl = this.dataset.linkUrl;
+
+        // 如果还有备用 API，尝试下一个
+        if (nextIndex < faviconApis.length) {
+            this.dataset.apiIndex = nextIndex.toString();
+            this.src = getFaviconUrl(linkUrl, nextIndex);
+        } else {
+            // 所有 API 都失败了，使用默认图标
+            this.onerror = null; // 防止无限循环
+            this.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' y1='8' x2='12' y2='12'/%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'/%3E%3C/svg%3E";
+        }
+    };
+
+    // 成功加载后缓存
+    imgElement.onload = async function () {
+        // 只缓存成功从网络加载的图标（不是默认图标）
+        if (!this.src.startsWith('data:image/svg+xml')) {
+            try {
+                const response = await fetch(this.src);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const reader = new FileReader();
+                    reader.onloadend = async () => {
+                        await setCachedFavicon(hostname, reader.result);
+                    };
+                    reader.readAsDataURL(blob);
+                }
+            } catch {
+                // 缓存失败不影响显示
+            }
+        }
+    };
+}
+
 // ===== 卡片创建 =====
 function createCard(link, container) {
     const card = document.createElement('div');
@@ -635,24 +796,9 @@ function createCard(link, container) {
     if (link.icon?.startsWith('http')) {
         icon.src = link.icon;
     } else {
-        icon.src = getFaviconUrl(link.url, 0);
+        // 异步加载 favicon，优先从缓存获取
+        loadFaviconWithCache(icon, link.url);
     }
-
-    icon.onerror = function () {
-        const currentIndex = parseInt(this.dataset.apiIndex || '0');
-        const nextIndex = currentIndex + 1;
-        const linkUrl = this.dataset.linkUrl;
-
-        // 如果还有备用 API，尝试下一个
-        if (nextIndex < faviconApis.length) {
-            this.dataset.apiIndex = nextIndex.toString();
-            this.src = getFaviconUrl(linkUrl, nextIndex);
-        } else {
-            // 所有 API 都失败了，使用默认图标
-            this.onerror = null; // 防止无限循环
-            this.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' y1='8' x2='12' y2='12'/%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'/%3E%3C/svg%3E";
-        }
-    };
 
     const title = document.createElement('div');
     const titleAlign = isAppLayout
