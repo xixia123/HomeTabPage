@@ -764,30 +764,45 @@ function updateCategorySelect() {
 
 // 异步加载 favicon，优先从缓存获取
 async function loadFaviconWithCache(imgElement, url) {
-    // 尝试通过 fetch 获取并缓存（按优先级尝试所有 API）
-    for (let i = 0; i < faviconApis.length; i++) {
-        const dataUrl = await fetchAndCacheFavicon(url, i);
-        if (dataUrl) {
-            imgElement.src = dataUrl;
-            return;
-        }
+    const hostname = getHostname(url);
+
+    // 1. 先尝试从缓存获取（快速路径）
+    const cached = await getCachedFavicon(hostname);
+    if (cached) {
+        imgElement.src = cached;
+        return;
     }
 
-    // 如果 fetch 全部失败（例如 CORS 限制），退回到直接加载（无法缓存，但能显示）
-    const loadDirectly = (index) => {
-        if (index >= faviconApis.length) {
+    // 2. 缓存未命中，使用直接加载方式（非阻塞，并行加载）
+    let currentApiIndex = 0;
+
+    const tryNextApi = () => {
+        if (currentApiIndex >= faviconApis.length) {
             // 所有 API 都失败，使用默认图标
             imgElement.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' y1='8' x2='12' y2='12'/%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'/%3E%3C/svg%3E";
             return;
         }
 
-        imgElement.src = getFaviconUrl(url, index);
-        imgElement.onerror = () => loadDirectly(index + 1);
-        // 直接加载时不使用 onload 缓存，因为跨域图片画入 canvas 会报错
-        imgElement.onload = null;
+        imgElement.src = getFaviconUrl(url, currentApiIndex);
+        currentApiIndex++;
     };
 
-    loadDirectly(0);
+    // 加载失败时尝试下一个 API
+    imgElement.onerror = tryNextApi;
+
+    // 加载成功后异步缓存（不阻塞显示）
+    imgElement.onload = function () {
+        // 只缓存真实图标，不缓存默认 SVG
+        if (!this.src.startsWith('data:image/svg+xml')) {
+            // 使用 fetch 方式异步缓存，不阻塞当前显示
+            fetchAndCacheFavicon(url, currentApiIndex - 1).catch(() => {
+                // 静默失败，缓存失败不影响显示
+            });
+        }
+    };
+
+    // 开始加载第一个 API
+    tryNextApi();
 }
 
 // ===== 卡片创建 =====
