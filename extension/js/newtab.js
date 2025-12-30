@@ -10,7 +10,7 @@ let initialDragState = { category: null, index: -1 };
 
 // 多个公开的 favicon API（按优先级排序）
 const faviconApis = [
-    (hostname) => `https://www.google.com/s2/favicons?sz=64&domain=${hostname}`,
+    // (hostname) => `https://www.google.com/s2/favicons?sz=64&domain=${hostname}`,
     (hostname) => `https://icons.duckduckgo.com/ip3/${hostname}.ico`,
     (hostname) => `https://${hostname}/favicon.ico`
 ];
