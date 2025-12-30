@@ -4,6 +4,7 @@
 let isEditMode = false;
 let isAppLayout = localStorage.getItem('appLayout') === 'true';
 const categories = {};
+let categoryOrder = []; // 明确的分类顺序数组
 let currentEngine;
 let initialDragState = { category: null, index: -1 };
 
@@ -15,6 +16,115 @@ const faviconApis = [
     (hostname) => `https://icons.duckduckgo.com/ip3/${hostname}.ico`,
     (hostname) => `https://${hostname}/favicon.ico`
 ];
+
+// ===== Favicon 缓存 (IndexedDB) =====
+const FAVICON_DB_NAME = 'favicon-cache';
+const FAVICON_STORE_NAME = 'favicons';
+const FAVICON_CACHE_EXPIRY_DAYS = 7;
+
+let faviconDB = null;
+
+async function openFaviconDB() {
+    if (faviconDB) return faviconDB;
+
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(FAVICON_DB_NAME, 1);
+
+        request.onerror = () => reject(request.error);
+
+        request.onsuccess = () => {
+            faviconDB = request.result;
+            resolve(faviconDB);
+        };
+
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(FAVICON_STORE_NAME)) {
+                db.createObjectStore(FAVICON_STORE_NAME, { keyPath: 'hostname' });
+            }
+        };
+    });
+}
+
+async function getCachedFavicon(hostname) {
+    try {
+        const db = await openFaviconDB();
+        return new Promise((resolve) => {
+            const transaction = db.transaction(FAVICON_STORE_NAME, 'readonly');
+            const store = transaction.objectStore(FAVICON_STORE_NAME);
+            const request = store.get(hostname);
+
+            request.onsuccess = () => {
+                const result = request.result;
+                if (result) {
+                    // 检查是否过期
+                    const now = Date.now();
+                    const expiryTime = FAVICON_CACHE_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+                    if (now - result.timestamp < expiryTime) {
+                        resolve(result.dataUrl);
+                        return;
+                    }
+                }
+                resolve(null);
+            };
+
+            request.onerror = () => resolve(null);
+        });
+    } catch {
+        return null;
+    }
+}
+
+async function setCachedFavicon(hostname, dataUrl) {
+    try {
+        const db = await openFaviconDB();
+        return new Promise((resolve) => {
+            const transaction = db.transaction(FAVICON_STORE_NAME, 'readwrite');
+            const store = transaction.objectStore(FAVICON_STORE_NAME);
+            store.put({
+                hostname: hostname,
+                dataUrl: dataUrl,
+                timestamp: Date.now()
+            });
+            transaction.oncomplete = () => resolve(true);
+            transaction.onerror = () => resolve(false);
+        });
+    } catch {
+        return false;
+    }
+}
+
+async function fetchAndCacheFavicon(url, apiIndex = 0) {
+    const hostname = getHostname(url);
+
+    // 尝试从缓存获取
+    const cached = await getCachedFavicon(hostname);
+    if (cached) {
+        return cached;
+    }
+
+    // 从网络获取并缓存
+    const faviconUrl = getFaviconUrl(url, apiIndex);
+
+    try {
+        const response = await fetch(faviconUrl);
+        if (!response.ok) throw new Error('Fetch failed');
+
+        const blob = await response.blob();
+        const dataUrl = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+        });
+
+        // 缓存成功获取的 favicon
+        await setCachedFavicon(hostname, dataUrl);
+        return dataUrl;
+    } catch {
+        // 如果还有备用 API，返回 null 让调用方尝试下一个
+        return null;
+    }
+}
 
 function getHostname(url) {
     try {
@@ -31,6 +141,7 @@ function getFaviconUrl(url, apiIndex = 0) {
     }
     return faviconApis[0](hostname);
 }
+
 
 // 搜索引擎配置
 const searchEngines = {
@@ -206,10 +317,12 @@ function initializeUIComponents() {
 // ===== 数据存储 =====
 async function loadLinks() {
     try {
-        const result = await chrome.storage.local.get(['categories']);
+        const result = await chrome.storage.local.get(['categories', 'categoryOrder']);
         if (result.categories) {
             Object.keys(categories).forEach(key => delete categories[key]);
             Object.assign(categories, result.categories);
+            // 加载分类顺序，如果不存在则使用当前键顺序
+            categoryOrder = result.categoryOrder || Object.keys(categories);
         }
         loadSections();
         updateCategorySelect();
@@ -227,7 +340,10 @@ async function loadLinks() {
 
 async function saveLinks() {
     try {
-        await chrome.storage.local.set({ categories: categories });
+        await chrome.storage.local.set({
+            categories: categories,
+            categoryOrder: categoryOrder
+        });
         console.log('数据已保存');
     } catch (error) {
         console.error('保存失败:', error);
@@ -319,6 +435,7 @@ async function addCategory() {
         return;
     }
     categories[categoryName] = { isHidden: false, links: [] };
+    categoryOrder.push(categoryName); // 添加到顺序数组
     updateCategorySelect();
     renderCategories();
     await saveLinks();
@@ -353,6 +470,11 @@ async function editCategoryName(oldName) {
 async function deleteCategory(category) {
     if (await customConfirm(`确定删除 "${category}" 分类及其所有链接吗？`)) {
         delete categories[category];
+        // 从顺序数组中移除
+        const index = categoryOrder.indexOf(category);
+        if (index > -1) {
+            categoryOrder.splice(index, 1);
+        }
         updateCategorySelect();
         renderCategories();
         renderCategoryButtons();
@@ -361,17 +483,22 @@ async function deleteCategory(category) {
 }
 
 async function moveCategory(categoryName, direction) {
-    const keys = Object.keys(categories);
-    const index = keys.indexOf(categoryName);
-    if (index < 0) return;
+    console.log('moveCategory called:', categoryName, 'direction:', direction);
+    console.log('Current order:', categoryOrder);
+    const index = categoryOrder.indexOf(categoryName);
+    if (index < 0) {
+        console.log('Category not found');
+        return;
+    }
     const newIndex = index + direction;
-    if (newIndex < 0 || newIndex >= keys.length) return;
-    const newCategories = {};
-    const reordered = [...keys];
-    [reordered[index], reordered[newIndex]] = [reordered[newIndex], reordered[index]];
-    reordered.forEach(key => newCategories[key] = categories[key]);
-    Object.keys(categories).forEach(k => delete categories[k]);
-    Object.assign(categories, newCategories);
+    if (newIndex < 0 || newIndex >= categoryOrder.length) {
+        console.log('Invalid move: newIndex out of bounds');
+        return;
+    }
+    // 直接在 categoryOrder 数组中交换位置
+    [categoryOrder[index], categoryOrder[newIndex]] = [categoryOrder[newIndex], categoryOrder[index]];
+    console.log('New order:', categoryOrder);
+
     renderCategories();
     renderCategoryButtons();
     await saveLinks();
@@ -383,16 +510,18 @@ async function toggleCategoryHidden(category, isHidden) {
 }
 
 async function pinCategory(categoryName) {
-    const keys = Object.keys(categories);
-    const index = keys.indexOf(categoryName);
-    if (index < 0) return;
-    const newCategories = {};
-    const reordered = [...keys];
-    reordered.splice(index, 1);
-    reordered.unshift(categoryName);
-    reordered.forEach(key => newCategories[key] = categories[key]);
-    Object.keys(categories).forEach(k => delete categories[k]);
-    Object.assign(categories, newCategories);
+    console.log('pinCategory called:', categoryName);
+    console.log('Current order:', categoryOrder);
+    const index = categoryOrder.indexOf(categoryName);
+    if (index < 0) {
+        console.log('Category not found');
+        return;
+    }
+    // 从当前位置移除，添加到开头
+    categoryOrder.splice(index, 1);
+    categoryOrder.unshift(categoryName);
+    console.log('New order after pin:', categoryOrder);
+
     renderCategories();
     renderCategoryButtons();
     await saveLinks();
@@ -444,7 +573,11 @@ function renderCategorySections({ renderButtons = false, searchMode = false, fil
     container.innerHTML = '';
     const sourceCategories = searchMode && filteredCategories ? filteredCategories : categories;
 
-    Object.entries(sourceCategories).forEach(([category, { links, isHidden }]) => {
+    // 使用 categoryOrder 来确定渲染顺序
+    const orderedKeys = searchMode ? Object.keys(sourceCategories) : categoryOrder.filter(key => sourceCategories[key]);
+
+    orderedKeys.forEach(category => {
+        const { links, isHidden } = sourceCategories[category];
         if (!isEditMode && isHidden && !searchMode) return;
 
         const section = document.createElement('div');
@@ -464,23 +597,58 @@ function renderCategorySections({ renderButtons = false, searchMode = false, fil
             controls.className = 'flex items-center gap-1 ml-auto bg-slate-300/50 dark:bg-slate-800/50 p-1 rounded-xl border border-slate-300/50 dark:border-slate-700/50 backdrop-blur-sm';
             const btnBase = "w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 hover:scale-105 active:scale-95";
 
-            controls.innerHTML = `
-                <button class="${btnBase} text-slate-500 hover:text-blue-600 hover:bg-blue-100 dark:text-slate-400 dark:hover:bg-blue-900/30" onclick="editCategoryName('${category}')" title="重命名">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                </button>
-                <button class="${btnBase} text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:text-slate-400" onclick="moveCategory('${category}', -1)" title="上移">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
-                </button>
-                <button class="${btnBase} text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:text-slate-400" onclick="moveCategory('${category}', 1)" title="下移">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                </button>
-                <button class="${btnBase} text-slate-500 hover:text-amber-600 hover:bg-amber-100 dark:text-slate-400" onclick="pinCategory('${category}')" title="置顶">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3h14M18 13l-6-6l-6 6M12 7v14"></path></svg>
-                </button>
-                <button class="${btnBase} text-slate-400 hover:text-red-600 hover:bg-red-100 dark:text-slate-500" onclick="deleteCategory('${category}')" title="删除">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                </button>
-            `;
+            // 重命名按钮
+            const renameBtn = document.createElement('button');
+            renameBtn.className = `${btnBase} text-slate-500 hover:text-blue-600 hover:bg-blue-100 dark:text-slate-400 dark:hover:bg-blue-900/30`;
+            renameBtn.title = "重命名";
+            renameBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>';
+            renameBtn.addEventListener('click', () => editCategoryName(category));
+            controls.appendChild(renameBtn);
+
+            // 上移按钮
+            const moveUpBtn = document.createElement('button');
+            moveUpBtn.className = `${btnBase} text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:text-slate-400`;
+            moveUpBtn.title = "上移";
+            moveUpBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>';
+            moveUpBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                moveCategory(category, -1);
+            });
+            controls.appendChild(moveUpBtn);
+
+            // 下移按钮
+            const moveDownBtn = document.createElement('button');
+            moveDownBtn.className = `${btnBase} text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:text-slate-400`;
+            moveDownBtn.title = "下移";
+            moveDownBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>';
+            moveDownBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                moveCategory(category, 1);
+            });
+            controls.appendChild(moveDownBtn);
+
+            // 置顶按钮
+            const pinBtn = document.createElement('button');
+            pinBtn.className = `${btnBase} text-slate-500 hover:text-amber-600 hover:bg-amber-100 dark:text-slate-400`;
+            pinBtn.title = "置顶";
+            pinBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3h14M18 13l-6-6l-6 6M12 7v14"></path></svg>';
+            pinBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                pinCategory(category);
+            });
+            controls.appendChild(pinBtn);
+
+            // 删除按钮
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = `${btnBase} text-slate-400 hover:text-red-600 hover:bg-red-100 dark:text-slate-500`;
+            deleteBtn.title = "删除";
+            deleteBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
+            deleteBtn.addEventListener('click', () => deleteCategory(category));
+            controls.appendChild(deleteBtn);
+
             titleContainer.appendChild(controls);
         }
 
@@ -596,6 +764,49 @@ function updateCategorySelect() {
     });
 }
 
+// 异步加载 favicon，优先从缓存获取
+async function loadFaviconWithCache(imgElement, url) {
+    const hostname = getHostname(url);
+
+    // 1. 先尝试从缓存获取（快速路径）
+    const cached = await getCachedFavicon(hostname);
+    if (cached) {
+        imgElement.src = cached;
+        return;
+    }
+
+    // 2. 缓存未命中，使用直接加载方式（非阻塞，并行加载）
+    let currentApiIndex = 0;
+
+    const tryNextApi = () => {
+        if (currentApiIndex >= faviconApis.length) {
+            // 所有 API 都失败，使用默认图标
+            imgElement.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' y1='8' x2='12' y2='12'/%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'/%3E%3C/svg%3E";
+            return;
+        }
+
+        imgElement.src = getFaviconUrl(url, currentApiIndex);
+        currentApiIndex++;
+    };
+
+    // 加载失败时尝试下一个 API
+    imgElement.onerror = tryNextApi;
+
+    // 加载成功后异步缓存（不阻塞显示）
+    imgElement.onload = function () {
+        // 只缓存真实图标，不缓存默认 SVG
+        if (!this.src.startsWith('data:image/svg+xml')) {
+            // 使用 fetch 方式异步缓存，不阻塞当前显示
+            fetchAndCacheFavicon(url, currentApiIndex - 1).catch(() => {
+                // 静默失败，缓存失败不影响显示
+            });
+        }
+    };
+
+    // 开始加载第一个 API
+    tryNextApi();
+}
+
 // ===== 卡片创建 =====
 function createCard(link, container) {
     const card = document.createElement('div');
@@ -635,24 +846,9 @@ function createCard(link, container) {
     if (link.icon?.startsWith('http')) {
         icon.src = link.icon;
     } else {
-        icon.src = getFaviconUrl(link.url, 0);
+        // 异步加载 favicon，优先从缓存获取
+        loadFaviconWithCache(icon, link.url);
     }
-
-    icon.onerror = function () {
-        const currentIndex = parseInt(this.dataset.apiIndex || '0');
-        const nextIndex = currentIndex + 1;
-        const linkUrl = this.dataset.linkUrl;
-
-        // 如果还有备用 API，尝试下一个
-        if (nextIndex < faviconApis.length) {
-            this.dataset.apiIndex = nextIndex.toString();
-            this.src = getFaviconUrl(linkUrl, nextIndex);
-        } else {
-            // 所有 API 都失败了，使用默认图标
-            this.onerror = null; // 防止无限循环
-            this.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='12' y1='8' x2='12' y2='12'/%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'/%3E%3C/svg%3E";
-        }
-    };
 
     const title = document.createElement('div');
     const titleAlign = isAppLayout
@@ -1124,3 +1320,10 @@ document.addEventListener('click', (e) => {
         document.querySelectorAll('.card-menu-dropdown').forEach(el => el.style.display = 'none');
     }
 });
+
+// ===== 暴露函数到全局作用域（用于 HTML 内联 onclick 调用）=====
+window.editCategoryName = editCategoryName;
+window.moveCategory = moveCategory;
+window.pinCategory = pinCategory;
+window.deleteCategory = deleteCategory;
+window.toggleCategoryHidden = toggleCategoryHidden;
