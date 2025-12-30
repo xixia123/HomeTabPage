@@ -7,10 +7,8 @@ const categories = {};
 let currentEngine;
 let initialDragState = { category: null, index: -1 };
 
-// 多个公开的 favicon API（按优先级排序，中国大陆可用的优先）
+// 多个公开的 favicon API（按优先级排序）
 const faviconApis = [
-    (hostname) => `https://api.iowen.cn/favicon/${hostname}.png`,
-    (hostname) => `https://favicon.im/${hostname}?larger=true`,
     (hostname) => `https://www.google.com/s2/favicons?sz=64&domain=${hostname}`,
     (hostname) => `https://icons.duckduckgo.com/ip3/${hostname}.ico`,
     (hostname) => `https://${hostname}/favicon.ico`
