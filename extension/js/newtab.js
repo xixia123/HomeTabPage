@@ -482,13 +482,16 @@ async function moveCategory(categoryName, direction) {
         console.log('Invalid move: newIndex out of bounds');
         return;
     }
-    const newCategories = {};
     const reordered = [...keys];
     [reordered[index], reordered[newIndex]] = [reordered[newIndex], reordered[index]];
     console.log('New order:', reordered);
-    reordered.forEach(key => newCategories[key] = categories[key]);
+
+    // 清空 categories 并按新顺序重新赋值（避免 Object.assign 的键排序问题）
+    const tempCategories = {};
+    keys.forEach(key => tempCategories[key] = categories[key]);
     Object.keys(categories).forEach(k => delete categories[k]);
-    Object.assign(categories, newCategories);
+    reordered.forEach(key => categories[key] = tempCategories[key]);
+
     console.log('Categories after reorder:', Object.keys(categories));
     renderCategories();
     renderCategoryButtons();
@@ -509,14 +512,17 @@ async function pinCategory(categoryName) {
         console.log('Category not found');
         return;
     }
-    const newCategories = {};
     const reordered = [...keys];
     reordered.splice(index, 1);
     reordered.unshift(categoryName);
     console.log('New order after pin:', reordered);
-    reordered.forEach(key => newCategories[key] = categories[key]);
+
+    // 清空 categories 并按新顺序重新赋值（避免 Object.assign 的键排序问题）
+    const tempCategories = {};
+    keys.forEach(key => tempCategories[key] = categories[key]);
     Object.keys(categories).forEach(k => delete categories[k]);
-    Object.assign(categories, newCategories);
+    reordered.forEach(key => categories[key] = tempCategories[key]);
+
     console.log('Categories after pin:', Object.keys(categories));
     renderCategories();
     renderCategoryButtons();
