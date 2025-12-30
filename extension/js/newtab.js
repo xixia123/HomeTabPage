@@ -4,6 +4,7 @@
 let isEditMode = false;
 let isAppLayout = localStorage.getItem('appLayout') === 'true';
 const categories = {};
+let categoryOrder = []; // 明确的分类顺序数组
 let currentEngine;
 let initialDragState = { category: null, index: -1 };
 
@@ -314,10 +315,12 @@ function initializeUIComponents() {
 // ===== 数据存储 =====
 async function loadLinks() {
     try {
-        const result = await chrome.storage.local.get(['categories']);
+        const result = await chrome.storage.local.get(['categories', 'categoryOrder']);
         if (result.categories) {
             Object.keys(categories).forEach(key => delete categories[key]);
             Object.assign(categories, result.categories);
+            // 加载分类顺序，如果不存在则使用当前键顺序
+            categoryOrder = result.categoryOrder || Object.keys(categories);
         }
         loadSections();
         updateCategorySelect();
@@ -335,7 +338,10 @@ async function loadLinks() {
 
 async function saveLinks() {
     try {
-        await chrome.storage.local.set({ categories: categories });
+        await chrome.storage.local.set({
+            categories: categories,
+            categoryOrder: categoryOrder
+        });
         console.log('数据已保存');
     } catch (error) {
         console.error('保存失败:', error);
@@ -427,6 +433,7 @@ async function addCategory() {
         return;
     }
     categories[categoryName] = { isHidden: false, links: [] };
+    categoryOrder.push(categoryName); // 添加到顺序数组
     updateCategorySelect();
     renderCategories();
     await saveLinks();
@@ -461,6 +468,11 @@ async function editCategoryName(oldName) {
 async function deleteCategory(category) {
     if (await customConfirm(`确定删除 "${category}" 分类及其所有链接吗？`)) {
         delete categories[category];
+        // 从顺序数组中移除
+        const index = categoryOrder.indexOf(category);
+        if (index > -1) {
+            categoryOrder.splice(index, 1);
+        }
         updateCategorySelect();
         renderCategories();
         renderCategoryButtons();
@@ -470,29 +482,21 @@ async function deleteCategory(category) {
 
 async function moveCategory(categoryName, direction) {
     console.log('moveCategory called:', categoryName, 'direction:', direction);
-    const keys = Object.keys(categories);
-    console.log('Current order:', keys);
-    const index = keys.indexOf(categoryName);
+    console.log('Current order:', categoryOrder);
+    const index = categoryOrder.indexOf(categoryName);
     if (index < 0) {
         console.log('Category not found');
         return;
     }
     const newIndex = index + direction;
-    if (newIndex < 0 || newIndex >= keys.length) {
+    if (newIndex < 0 || newIndex >= categoryOrder.length) {
         console.log('Invalid move: newIndex out of bounds');
         return;
     }
-    const reordered = [...keys];
-    [reordered[index], reordered[newIndex]] = [reordered[newIndex], reordered[index]];
-    console.log('New order:', reordered);
+    // 直接在 categoryOrder 数组中交换位置
+    [categoryOrder[index], categoryOrder[newIndex]] = [categoryOrder[newIndex], categoryOrder[index]];
+    console.log('New order:', categoryOrder);
 
-    // 清空 categories 并按新顺序重新赋值（避免 Object.assign 的键排序问题）
-    const tempCategories = {};
-    keys.forEach(key => tempCategories[key] = categories[key]);
-    Object.keys(categories).forEach(k => delete categories[k]);
-    reordered.forEach(key => categories[key] = tempCategories[key]);
-
-    console.log('Categories after reorder:', Object.keys(categories));
     renderCategories();
     renderCategoryButtons();
     await saveLinks();
@@ -505,25 +509,17 @@ async function toggleCategoryHidden(category, isHidden) {
 
 async function pinCategory(categoryName) {
     console.log('pinCategory called:', categoryName);
-    const keys = Object.keys(categories);
-    console.log('Current order:', keys);
-    const index = keys.indexOf(categoryName);
+    console.log('Current order:', categoryOrder);
+    const index = categoryOrder.indexOf(categoryName);
     if (index < 0) {
         console.log('Category not found');
         return;
     }
-    const reordered = [...keys];
-    reordered.splice(index, 1);
-    reordered.unshift(categoryName);
-    console.log('New order after pin:', reordered);
+    // 从当前位置移除，添加到开头
+    categoryOrder.splice(index, 1);
+    categoryOrder.unshift(categoryName);
+    console.log('New order after pin:', categoryOrder);
 
-    // 清空 categories 并按新顺序重新赋值（避免 Object.assign 的键排序问题）
-    const tempCategories = {};
-    keys.forEach(key => tempCategories[key] = categories[key]);
-    Object.keys(categories).forEach(k => delete categories[k]);
-    reordered.forEach(key => categories[key] = tempCategories[key]);
-
-    console.log('Categories after pin:', Object.keys(categories));
     renderCategories();
     renderCategoryButtons();
     await saveLinks();
@@ -575,7 +571,11 @@ function renderCategorySections({ renderButtons = false, searchMode = false, fil
     container.innerHTML = '';
     const sourceCategories = searchMode && filteredCategories ? filteredCategories : categories;
 
-    Object.entries(sourceCategories).forEach(([category, { links, isHidden }]) => {
+    // 使用 categoryOrder 来确定渲染顺序
+    const orderedKeys = searchMode ? Object.keys(sourceCategories) : categoryOrder.filter(key => sourceCategories[key]);
+
+    orderedKeys.forEach(category => {
+        const { links, isHidden } = sourceCategories[category];
         if (!isEditMode && isHidden && !searchMode) return;
 
         const section = document.createElement('div');
