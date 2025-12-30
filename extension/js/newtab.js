@@ -469,17 +469,27 @@ async function deleteCategory(category) {
 }
 
 async function moveCategory(categoryName, direction) {
+    console.log('moveCategory called:', categoryName, 'direction:', direction);
     const keys = Object.keys(categories);
+    console.log('Current order:', keys);
     const index = keys.indexOf(categoryName);
-    if (index < 0) return;
+    if (index < 0) {
+        console.log('Category not found');
+        return;
+    }
     const newIndex = index + direction;
-    if (newIndex < 0 || newIndex >= keys.length) return;
+    if (newIndex < 0 || newIndex >= keys.length) {
+        console.log('Invalid move: newIndex out of bounds');
+        return;
+    }
     const newCategories = {};
     const reordered = [...keys];
     [reordered[index], reordered[newIndex]] = [reordered[newIndex], reordered[index]];
+    console.log('New order:', reordered);
     reordered.forEach(key => newCategories[key] = categories[key]);
     Object.keys(categories).forEach(k => delete categories[k]);
     Object.assign(categories, newCategories);
+    console.log('Categories after reorder:', Object.keys(categories));
     renderCategories();
     renderCategoryButtons();
     await saveLinks();
@@ -491,16 +501,23 @@ async function toggleCategoryHidden(category, isHidden) {
 }
 
 async function pinCategory(categoryName) {
+    console.log('pinCategory called:', categoryName);
     const keys = Object.keys(categories);
+    console.log('Current order:', keys);
     const index = keys.indexOf(categoryName);
-    if (index < 0) return;
+    if (index < 0) {
+        console.log('Category not found');
+        return;
+    }
     const newCategories = {};
     const reordered = [...keys];
     reordered.splice(index, 1);
     reordered.unshift(categoryName);
+    console.log('New order after pin:', reordered);
     reordered.forEach(key => newCategories[key] = categories[key]);
     Object.keys(categories).forEach(k => delete categories[k]);
     Object.assign(categories, newCategories);
+    console.log('Categories after pin:', Object.keys(categories));
     renderCategories();
     renderCategoryButtons();
     await saveLinks();
